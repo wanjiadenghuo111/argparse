@@ -17,6 +17,62 @@ typedef std::map<std::string, size_t> IndexMap;
 #include <cassert>
 #include <algorithm>
 
+
+template <typename T>
+T castTo(const std::string& item) {
+    std::istringstream sin(item);
+    T value;
+    sin >> value;
+    return value;
+}
+
+template <typename T>
+std::string toString(const T& item) {
+    std::ostringstream sout;
+    sout << item;
+    return sout.str();
+}
+
+template<typename T>
+std::ostream& operator << (std::ostream& out, const std::vector<T>& v) {
+    out << "[";
+    for(unsigned long i = 0; i < v.size(); ++i) {
+        if (i > 0)
+            out << ", ";
+        out << v[i];
+    }
+    out << "]";
+
+    return out;
+}
+
+template<typename T>
+std::istream& operator >> (std::istream& in, std::vector<T>& v) {
+    v.clear();
+
+    std::string str;
+    std::getline(in, str, '\n');
+    str.erase(
+        std::remove_if(
+            str.begin(), str.end(),
+            [](unsigned char x){
+                    return std::isspace(x) || x == '[' || x == ']';
+            }
+        ),
+        str.end()
+    );
+
+    std::istringstream sin(str);
+    while(sin.good())
+    {
+        std::string substr;
+        std::getline(sin, substr, ',');
+        if(!substr.empty()) v.push_back(castTo<T>(substr));
+    }
+
+    return in;
+}
+
 /*! @class ArgumentParser
  *  @brief A simple command-line argument parser based on the design of
  *  python's parser of the same name.
@@ -41,79 +97,10 @@ typedef std::map<std::string, size_t> IndexMap;
  */
 class ArgumentParser {
 private:
-    class Any;
     class Argument;
-    class PlaceHolder;
-    class Holder;
     typedef std::string String;
-    typedef std::vector<Any> AnyVector;
     typedef std::vector<String> StringVector;
     typedef std::vector<Argument> ArgumentVector;
-
-    // --------------------------------------------------------------------------
-    // Type-erasure internal storage
-    // --------------------------------------------------------------------------
-    class Any {
-    public:
-        // constructor
-        Any() : content(0) {}
-        // destructor
-        ~Any() { delete content; }
-        // INWARD CONVERSIONS
-        Any(const Any& other) : content(other.content ? other.content->clone() : 0) {}
-        template <typename ValueType>
-        Any(const ValueType& other)
-                : content(new Holder<ValueType>(other)) {}
-        Any& swap(Any& other) {
-            std::swap(content, other.content);
-            return *this;
-        }
-        Any& operator=(const Any& rhs) {
-            Any tmp(rhs);
-            return swap(tmp);
-        }
-        template <typename ValueType>
-        Any& operator=(const ValueType& rhs) {
-            Any tmp(rhs);
-            return swap(tmp);
-        }
-        // OUTWARD CONVERSIONS
-        template <typename ValueType>
-        ValueType* toPtr() const {
-            return content->type_info() == typeid(ValueType)
-                       ? &static_cast<Holder<ValueType>*>(content)->held_
-                       : 0;
-        }
-        template <typename ValueType>
-        ValueType& castTo() {
-            if (!toPtr<ValueType>()) throw std::bad_cast();
-            return *toPtr<ValueType>();
-        }
-        template <typename ValueType>
-        const ValueType& castTo() const {
-            if (!toPtr<ValueType>()) throw std::bad_cast();
-            return *toPtr<ValueType>();
-        }
-
-    private:
-        // Inner placeholder interface
-        class PlaceHolder {
-        public:
-            virtual ~PlaceHolder() {}
-            virtual const std::type_info& type_info() const = 0;
-            virtual PlaceHolder* clone() const = 0;
-        };
-        // Inner template concrete instantiation of PlaceHolder
-        template <typename ValueType>
-        class Holder : public PlaceHolder {
-        public:
-            ValueType held_;
-            Holder(const ValueType& value) : held_(value) {}
-            virtual const std::type_info& type_info() const { return typeid(ValueType); }
-            virtual PlaceHolder* clone() const { return new Holder(held_); }
-        };
-        PlaceHolder* content;
-    };
 
     // --------------------------------------------------------------------------
     // Argument
@@ -187,7 +174,7 @@ private:
         if (arg.fixed && arg.fixed_nargs <= 1) {
             variables_.push_back(String());
         } else {
-            variables_.push_back(StringVector());
+            variables_.push_back(String());
         }
         if (!arg.short_name.empty()) index_[arg.short_name] = N;
         if (!arg.name.empty()) index_[arg.name] = N;
@@ -214,7 +201,7 @@ private:
     String app_name_;
     String final_name_;
     ArgumentVector arguments_;
-    AnyVector variables_;
+    StringVector variables_;
 
 public:
     ArgumentParser() : ignore_first_(true), use_exceptions_(false), required_(0) {}
@@ -277,6 +264,7 @@ public:
              in < argv.end() - nfinal; ++in) {
             String active_name = active.canonicalName();
             String el = *in;
+
             //  check if the element is a key
             if (index_.count(el) == 0) {
                 // input
@@ -285,9 +273,13 @@ public:
                     argumentError(String("attempt to pass too many inputs to ").append(active_name),
                                   true);
                 if (active.fixed && active.fixed_nargs == 1) {
-                    variables_[index_[active_name]].castTo<String>() = el;
+                    variables_[index_[active_name]] = el;
                 } else {
-                    variables_[index_[active_name]].castTo<StringVector>().push_back(el);
+                    String& variable = variables_[index_[active_name]];
+                    StringVector value = castTo<StringVector>(variable);
+                    value.push_back(el);
+                    variable = toString(value);
+                    std::cout << active_name << ": " << variable << std::endl;
                 }
                 consumed++;
             } else {
@@ -328,9 +320,12 @@ public:
                                   .append(" while parsing final required inputs"),
                               true);
             if (final.fixed && final.fixed_nargs == 1) {
-                variables_[index_[final_name_]].castTo<String>() = el;
+                variables_[index_[final_name_]] = el;
             } else {
-                variables_[index_[final_name_]].castTo<StringVector>().push_back(el);
+                String& variable = variables_[index_[final_name_]];
+                StringVector value = castTo<StringVector>(variable);
+                value.push_back(el);
+                variable = toString(value);
             }
             nfinal--;
         }
@@ -344,10 +339,10 @@ public:
     // Retrieve
     // --------------------------------------------------------------------------
     template <typename T>
-    T& retrieve(const String& name) {
+    T retrieve(const String& name) {
         if (index_.count(delimit(name)) == 0) throw std::out_of_range("Key not found");
         size_t N = index_[delimit(name)];
-        return variables_[N].castTo<T>();
+        return castTo<T>(variables_[N]);
     }
 
     // --------------------------------------------------------------------------
@@ -422,12 +417,12 @@ public:
         if (index_.count(delimit(name)) == 0) return 0;
         size_t N = index_[delimit(name)];
         Argument arg = arguments_[N];
-        Any var = variables_[N];
+        String var = variables_[N];
         // check if the argument is a vector
         if (arg.fixed) {
-            return !var.castTo<String>().empty();
+            return !var.empty();
         } else {
-            return var.castTo<StringVector>().size();
+            return var.size();
         }
     }
 };
