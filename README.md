@@ -105,5 +105,5 @@ Method Summary
     empty()               check if the set of specified arguments is empty
     clear()               clear all specified arguments
     exists()              check if an argument has been found
-    count()               count the number of inputs for an argument
+    gotArguemnt()         check if an argument is provided by the user
 

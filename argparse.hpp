@@ -17,6 +17,41 @@ typedef std::map<std::string, size_t> IndexMap;
 #include <cassert>
 #include <algorithm>
 
+// From https://github.com/davisking/dlib/blob/master/dlib/algs.h
+template <typename T> struct is_standard_type        { const static bool value = false; };
+
+template <> struct is_standard_type<float>           { const static bool value = true; };
+template <> struct is_standard_type<double>          { const static bool value = true; };
+template <> struct is_standard_type<long double>     { const static bool value = true; };
+template <> struct is_standard_type<short>           { const static bool value = true; };
+template <> struct is_standard_type<int>             { const static bool value = true; };
+template <> struct is_standard_type<long>            { const static bool value = true; };
+template <> struct is_standard_type<unsigned short>  { const static bool value = true; };
+template <> struct is_standard_type<unsigned int>    { const static bool value = true; };
+template <> struct is_standard_type<unsigned long>   { const static bool value = true; };
+template <> struct is_standard_type<char>            { const static bool value = true; };
+template <> struct is_standard_type<signed char>     { const static bool value = true; };
+template <> struct is_standard_type<unsigned char>   { const static bool value = true; };
+template <> struct is_standard_type<std::string>   { const static bool value = true; };
+
+// From https://github.com/davisking/dlib/blob/master/dlib/enable_if.h
+template <bool B, class T = void>
+struct enable_if_c { typedef T type; };
+
+template <class T>
+struct enable_if_c<false, T> {};
+
+template <class Cond, class T = void>
+struct enable_if : public enable_if_c<Cond::value, T> {};
+
+template <bool B, class T = void>
+struct disable_if_c { typedef T type; };
+
+template <class T>
+struct disable_if_c<true, T> {};
+
+template <class Cond, class T = void>
+struct disable_if : public disable_if_c<Cond::value, T> {};
 
 template <typename T>
 T castTo(const std::string& item) {
@@ -46,21 +81,47 @@ std::ostream& operator << (std::ostream& out, const std::vector<T>& v) {
     return out;
 }
 
+void remove_space(std::string& str) {
+    str.erase(
+        std::remove_if(
+            str.begin(), str.end(),
+            [](unsigned char x){ return std::isspace(x); }
+        ),
+        str.end()
+    );
+}
+
+void strip_brackets(std::string& str) {
+    auto first_bracket = str.find_first_of('[');
+    if(first_bracket == std::string::npos) {
+        std::ostringstream sout;
+        sout << "Could not find a left bracket in " << str;
+        throw std::runtime_error(sout.str());
+    }
+    str.erase(str.begin() + first_bracket);
+
+    auto last_bracket = str.find_last_of(']');
+    if(last_bracket == std::string::npos) {
+        std::ostringstream sout;
+        sout << "Could not find a right bracket in " << str;
+        throw std::runtime_error(sout.str());
+    }
+    str.erase(str.begin() + last_bracket);
+}
+
 template<typename T>
-std::istream& operator >> (std::istream& in, std::vector<T>& v) {
+typename enable_if<
+    is_standard_type<T>,
+    std::istream&
+>::type operator >> (std::istream& in, std::vector<T>& v) {
     v.clear();
 
     std::string str;
     std::getline(in, str, '\n');
-    str.erase(
-        std::remove_if(
-            str.begin(), str.end(),
-            [](unsigned char x){
-                    return std::isspace(x) || x == '[' || x == ']';
-            }
-        ),
-        str.end()
-    );
+
+    if(str.empty()) return in;
+    remove_space(str);
+    strip_brackets(str);
 
     std::istringstream sin(str);
     while(sin.good())
@@ -68,6 +129,31 @@ std::istream& operator >> (std::istream& in, std::vector<T>& v) {
         std::string substr;
         std::getline(sin, substr, ',');
         if(!substr.empty()) v.push_back(castTo<T>(substr));
+    }
+
+    return in;
+}
+
+template<typename T>
+typename enable_if<
+    is_standard_type<T>,
+    std::istream&
+>::type operator >> (std::istream& in, std::vector<std::vector<T> >& v) {
+    static const std::string delimiter = "]";
+    v.clear();
+
+    std::string str;
+    std::getline(in, str, '\n');
+
+    if(str.empty()) return in;
+    remove_space(str);
+    strip_brackets(str);
+
+    size_t pos = 0;
+    while ((pos = str.find(delimiter)) != std::string::npos) {
+        std::string substr = str.substr(0, pos + 1);
+        v.push_back(castTo<std::vector<T> >(substr));
+        str.erase(0, pos + delimiter.length());
     }
 
     return in;
@@ -279,7 +365,6 @@ public:
                     StringVector value = castTo<StringVector>(variable);
                     value.push_back(el);
                     variable = toString(value);
-                    std::cout << active_name << ": " << variable << std::endl;
                 }
                 consumed++;
             } else {
@@ -412,18 +497,13 @@ public:
         variables_.clear();
     }
     bool exists(const String& name) const { return index_.count(delimit(name)) > 0; }
-    size_t count(const String& name) {
+    bool gotArgument(const String& name) {
         // check if the name is an argument
         if (index_.count(delimit(name)) == 0) return 0;
         size_t N = index_[delimit(name)];
         Argument arg = arguments_[N];
         String var = variables_[N];
-        // check if the argument is a vector
-        if (arg.fixed) {
-            return !var.empty();
-        } else {
-            return var.size();
-        }
+        return !var.empty() && var != "[]";
     }
 };
 #endif
