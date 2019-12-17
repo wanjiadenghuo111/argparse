@@ -308,6 +308,7 @@ namespace argparse {
                     consumed++;
                 } else {
                     // new key!
+                    arguments_[index_[el]].specified = true;
                     // has the active argument consumed enough elements?
                     if ((active.fixed && active.fixed_nargs != consumed) ||
                         (!active.fixed && active.variable_nargs == '+' && consumed < 1))
@@ -317,7 +318,6 @@ namespace argparse {
                                           .append(active_name),
                                       true);
                     active = arguments_[index_[el]];
-                    arguments_[index_[el]].specified = true;
                     // check if we've satisfied the required arguments
                     if (active.optional && nrequired > 0)
                         argumentError(String("encountered optional argument ")
